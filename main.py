@@ -2579,6 +2579,10 @@ def show_login_page():
                         st.session_state["authenticated"] = True
                         st.session_state["username"] = username
                         st.session_state["session_timestamp"] = get_session_timestamp()
+                        
+                        # Save session to file for persistence
+                        save_session_to_file()
+                        
                         st.success(message)
                         st.rerun()
                     else:
@@ -2821,12 +2825,80 @@ def calculate_team_stats(company_code: str) -> dict:
         "completion_rate": completion_rate
     }
 
-# Session management functions - Simplified approach
+# Session management functions - Persistent session state
+def save_session_to_file():
+    """Save session data to a temporary file for persistence across reloads."""
+    if st.session_state.get("authenticated", False):
+        # Create a unique session ID for this browser session
+        import random
+        import string
+        
+        # Generate a session ID if not exists
+        if "persistent_session_id" not in st.session_state:
+            session_id = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+            st.session_state["persistent_session_id"] = session_id
+        
+        session_id = st.session_state["persistent_session_id"]
+        
+        # Create session data
+        session_data = {
+            "authenticated": True,
+            "username": st.session_state.get("username", ""),
+            "session_timestamp": st.session_state.get("session_timestamp"),
+            "current_page": st.session_state.get("current_page", "dashboard"),
+            "session_id": session_id
+        }
+        
+        # Save to file
+        session_file = Path(f"temp_session_{session_id}.json")
+        try:
+            with session_file.open("w", encoding="utf-8") as f:
+                json.dump(session_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            pass  # Silently fail if file write fails
+
+def load_session_from_file():
+    """Load session data from temporary file."""
+    # Check if we have a session ID in the current session state
+    if "persistent_session_id" not in st.session_state:
+        return None
+    
+    session_id = st.session_state["persistent_session_id"]
+    session_file = Path(f"temp_session_{session_id}.json")
+    
+    if session_file.exists():
+        try:
+            with session_file.open("r", encoding="utf-8") as f:
+                session_data = json.load(f)
+            
+            # Check if session is still valid
+            session_timestamp = session_data.get("session_timestamp")
+            if session_timestamp and is_session_valid(session_timestamp, timeout_hours=48):
+                return session_data
+            else:
+                # Session expired, remove the file
+                session_file.unlink(missing_ok=True)
+        except Exception as e:
+            # If there's any error reading the file, remove it
+            session_file.unlink(missing_ok=True)
+    
+    return None
+
+def clear_session_file():
+    """Clear temporary session file."""
+    if "persistent_session_id" in st.session_state:
+        session_id = st.session_state["persistent_session_id"]
+        session_file = Path(f"temp_session_{session_id}.json")
+        session_file.unlink(missing_ok=True)
+
 def save_current_session():
-    """Save current session state (no file persistence needed)."""
-    # This function is kept for compatibility but doesn't save to file
-    # Streamlit's session state is already persistent per browser session
-    pass
+    """Save current session state to file."""
+    save_session_to_file()
+
+def navigate_to_page(page_name):
+    """Navigate to a page and save session."""
+    st.session_state["current_page"] = page_name
+    save_current_session()
 
 # -------------------------------------------------------------
 # Main Application
@@ -2917,8 +2989,15 @@ def main():
     if "session_timestamp" not in st.session_state:
         st.session_state["session_timestamp"] = None
     
-    # No file-based session restoration - rely only on Streamlit's session state
-    # Each browser session is automatically isolated by Streamlit
+    # Try to restore session from file if not authenticated
+    if not st.session_state["authenticated"]:
+        saved_session = load_session_from_file()
+        if saved_session:
+            st.session_state["authenticated"] = saved_session.get("authenticated", False)
+            st.session_state["username"] = saved_session.get("username", "")
+            st.session_state["session_timestamp"] = saved_session.get("session_timestamp")
+            st.session_state["current_page"] = saved_session.get("current_page", "dashboard")
+            st.session_state["persistent_session_id"] = saved_session.get("session_id")
     
     # Session validation and automatic login
     if st.session_state["authenticated"]:
@@ -2929,12 +3008,14 @@ def main():
             st.session_state["username"] = ""
             st.session_state["session_timestamp"] = None
             st.session_state["current_page"] = "dashboard"
+            clear_session_file()  # Clear the session file
             st.warning("⚠️ Your session has expired. Please login again.")
             show_login_page()
             return
         else:
             # Session is valid, refresh it to extend the timeout
             st.session_state["session_timestamp"] = get_session_timestamp()
+            save_current_session()
     
     # Authentication check
     if not st.session_state["authenticated"]:
@@ -2983,97 +3064,102 @@ def main():
         # Personal features
         if st.button("🏠 Dashboard", use_container_width=True):
             st.session_state["current_page"] = "dashboard"
+            save_current_session()
         
         if st.button("📋 My Tasks", use_container_width=True):
             st.session_state["current_page"] = "tasks"
+            save_current_session()
         
         if st.button("📝 Notes", use_container_width=True):
             st.session_state["current_page"] = "notes"
+            save_current_session()
         
         if st.button("👥 Contacts", use_container_width=True):
             st.session_state["current_page"] = "contacts"
+            save_current_session()
         
         if st.button("🎯 Goals", use_container_width=True):
             st.session_state["current_page"] = "goals"
+            save_current_session()
         
         # Company features
         if company_info and company_info.get("name"):
             st.markdown("### 🏢 Company Features")
             
             if st.button("👥 Team Members", use_container_width=True):
-                st.session_state["current_page"] = "team"
+                navigate_to_page("team")
             
             if can_assign_tasks(username):
                 if st.button("📋 Assign Tasks", use_container_width=True):
-                    st.session_state["current_page"] = "assign_tasks"
+                    navigate_to_page("assign_tasks")
             
             if st.button("📊 Team Analytics", use_container_width=True):
-                st.session_state["current_page"] = "analytics"
+                navigate_to_page("analytics")
             
             # Chat features for company members
             if st.button("💬 Company Chat", use_container_width=True):
-                st.session_state["current_page"] = "company_chat"
+                navigate_to_page("company_chat")
             
             if st.button("💬 Private Chat", use_container_width=True):
-                st.session_state["current_page"] = "private_chat"
+                navigate_to_page("private_chat")
             
             # File sharing
             if st.button("📁 File Sharing", use_container_width=True):
-                st.session_state["current_page"] = "file_sharing"
+                navigate_to_page("file_sharing")
             
             # Calendar
             if st.button("📅 Calendar", use_container_width=True):
-                st.session_state["current_page"] = "calendar"
+                navigate_to_page("calendar")
             
             # Polls
             if st.button("📊 Polls", use_container_width=True):
-                st.session_state["current_page"] = "polls"
+                navigate_to_page("polls")
             
             # Search
             if st.button("🔍 Search", use_container_width=True):
-                st.session_state["current_page"] = "search"
+                navigate_to_page("search")
             
             if user_info.get("role") in ["admin", "manager", "ceo", "cfo", "cto", "vp", "director"]:
                 if st.button("👥 Role Management", use_container_width=True):
-                    st.session_state["current_page"] = "role_management"
+                    navigate_to_page("role_management")
             
             if user_info.get("role") in ["admin", "manager"]:
                 if st.button("⚙️ Company Settings", use_container_width=True):
-                    st.session_state["current_page"] = "company_settings"
+                    navigate_to_page("company_settings")
         
         # Advanced Management Features (Upper Level)
         if user_info.get("role") in ["admin", "manager", "ceo", "cfo", "cto", "vp", "director", "senior_manager"]:
             st.markdown("### 🚀 Advanced Management")
             
             if st.button("📊 Project Management", use_container_width=True):
-                st.session_state["current_page"] = "project_management"
+                navigate_to_page("project_management")
             
             if st.button("🏢 Department Management", use_container_width=True):
-                st.session_state["current_page"] = "department_management"
+                navigate_to_page("department_management")
             
             if st.button("📈 Performance Reviews", use_container_width=True):
-                st.session_state["current_page"] = "performance_reviews"
+                navigate_to_page("performance_reviews")
             
             if st.button("💰 Budget Management", use_container_width=True):
-                st.session_state["current_page"] = "budget_management"
+                navigate_to_page("budget_management")
             
             if st.button("📋 Advanced Reports", use_container_width=True):
-                st.session_state["current_page"] = "advanced_reports"
+                navigate_to_page("advanced_reports")
             
             if st.button("🔄 Workflow Management", use_container_width=True):
-                st.session_state["current_page"] = "workflow_management"
+                navigate_to_page("workflow_management")
             
             if st.button("📚 Knowledge Base", use_container_width=True):
-                st.session_state["current_page"] = "knowledge_base"
+                navigate_to_page("knowledge_base")
             
             if st.button("🔗 Integrations", use_container_width=True):
-                st.session_state["current_page"] = "integrations"
+                navigate_to_page("integrations")
     
         # Company creation for users without a company
         if not company_info:
             st.markdown("### 🏢 Company Management")
             if st.button("🏢 Create Company", use_container_width=True):
-                st.session_state["current_page"] = "create_company"
+                navigate_to_page("create_company")
         
         # Notifications with enhanced counter
         notifications = get_user_notifications(username)
@@ -3088,14 +3174,17 @@ def main():
             button_style = ""
         
         if st.button(notification_text, use_container_width=True, key="notifications_button"):
-            st.session_state["current_page"] = "notifications"
+            navigate_to_page("notifications")
         
         # Settings and logout
         st.markdown("---")
         if st.button("⚙️ Settings", use_container_width=True):
-            st.session_state["current_page"] = "settings"
+            navigate_to_page("settings")
         
         if st.button("🚪 Logout", use_container_width=True):
+            # Clear session file
+            clear_session_file()
+            
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
