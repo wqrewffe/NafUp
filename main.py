@@ -2832,25 +2832,33 @@ def calculate_team_stats(company_code: str) -> dict:
     }
 
 # Session management functions
-def get_session_id():
-    """Generate a unique session ID for the current user."""
-    # For Streamlit deployments, we'll use a combination of server info
-    # This creates a unique identifier per browser session
-    try:
-        # Try to get server info, fallback to a default if not available
-        server_address = st.get_option('server.address') or 'localhost'
-        server_port = st.get_option('server.port') or '8501'
-        session_key = f"{server_address}_{server_port}"
-    except:
-        # Fallback for deployment environments
-        session_key = "default_session"
+def get_browser_fingerprint():
+    """Generate a unique browser fingerprint for session isolation."""
+    # This creates a unique identifier for each browser session
+    # In a real implementation, you might use more sophisticated fingerprinting
+    import random
+    import string
     
-    return hashlib.md5(session_key.encode()).hexdigest()
+    # Generate a random session ID for this browser session
+    if "browser_session_id" not in st.session_state:
+        st.session_state["browser_session_id"] = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    
+    return st.session_state["browser_session_id"]
+
+def get_user_session_file(username: str, browser_id: str):
+    """Get the session file path for a specific user and browser."""
+    # Use username + browser ID to create a unique session file
+    session_file = Path(f"user_session_{username}_{browser_id}.json")
+    return session_file
 
 def save_session_to_file(session_data: dict):
-    """Save session data to a user-specific file."""
-    session_id = get_session_id()
-    session_file = Path(f"session_{session_id}.json")
+    """Save session data to user-specific file."""
+    username = session_data.get("username", "")
+    if not username:
+        return
+    
+    browser_id = get_browser_fingerprint()
+    session_file = get_user_session_file(username, browser_id)
     
     try:
         with session_file.open("w", encoding="utf-8") as f:
@@ -2858,10 +2866,9 @@ def save_session_to_file(session_data: dict):
     except Exception as e:
         st.error(f"Failed to save session: {e}")
 
-def load_session_from_file():
+def load_session_from_file(username: str, browser_id: str):
     """Load session data from user-specific file."""
-    session_id = get_session_id()
-    session_file = Path(f"session_{session_id}.json")
+    session_file = get_user_session_file(username, browser_id)
     
     if session_file.exists():
         try:
@@ -2881,11 +2888,35 @@ def load_session_from_file():
     
     return None
 
-def clear_session_file():
+def clear_session_file(username: str, browser_id: str):
     """Clear user-specific session file."""
-    session_id = get_session_id()
-    session_file = Path(f"session_{session_id}.json")
+    session_file = get_user_session_file(username, browser_id)
     session_file.unlink(missing_ok=True)
+
+def find_existing_session():
+    """Find if there's an existing valid session for the current browser."""
+    browser_id = get_browser_fingerprint()
+    
+    # Look for session files for this browser
+    session_files = list(Path(".").glob(f"user_session_*_{browser_id}.json"))
+    
+    for session_file in session_files:
+        try:
+            with session_file.open("r", encoding="utf-8") as f:
+                session_data = json.load(f)
+            
+            # Check if session is still valid
+            session_timestamp = session_data.get("session_timestamp")
+            if session_timestamp and is_session_valid(session_timestamp, timeout_hours=48):
+                return session_data
+            else:
+                # Session expired, remove the file
+                session_file.unlink(missing_ok=True)
+        except Exception as e:
+            # If there's any error reading the file, remove it
+            session_file.unlink(missing_ok=True)
+    
+    return None
 
 def save_current_session():
     """Save current session state to file."""
@@ -2989,7 +3020,8 @@ def main():
     
     # Try to restore session from file if not authenticated
     if not st.session_state["authenticated"]:
-        saved_session = load_session_from_file()
+        # First, try to find any existing valid session
+        saved_session = find_existing_session()
         if saved_session:
             st.session_state["authenticated"] = saved_session.get("authenticated", False)
             st.session_state["username"] = saved_session.get("username", "")
@@ -3001,11 +3033,14 @@ def main():
         session_timestamp = st.session_state.get("session_timestamp")
         if session_timestamp is None or not is_session_valid(session_timestamp, timeout_hours=48):
             # Session expired
+            username = st.session_state.get("username", "")
+            browser_id = get_browser_fingerprint()
             st.session_state["authenticated"] = False
             st.session_state["username"] = ""
             st.session_state["session_timestamp"] = None
             st.session_state["current_page"] = "dashboard"
-            clear_session_file()  # Clear the session file
+            if username:
+                clear_session_file(username, browser_id)  # Clear the session file
             st.warning("⚠️ Your session has expired. Please login again.")
             show_login_page()
             return
@@ -3202,7 +3237,10 @@ def main():
         
         if st.button("🚪 Logout", use_container_width=True):
             # Clear session file
-            clear_session_file()
+            username = st.session_state.get("username", "")
+            browser_id = get_browser_fingerprint()
+            if username:
+                clear_session_file(username, browser_id)
             
             # Clear session state
             for key in list(st.session_state.keys()):
