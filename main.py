@@ -307,29 +307,96 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# File paths
-DATA_FILE = Path("users.json")
-AUTH_FILE = Path("auth.json")
-COMPANIES_FILE = Path("companies.json")
-NOTIFICATIONS_FILE = Path("notifications.json")
-CHAT_FILE = Path("chat_messages.json")
-PRIVATE_CHAT_FILE = Path("private_chats.json")
-FILES_FILE = Path("shared_files.json")
-PRIVATE_FILES_FILE = Path("private_files.json")
-CALENDAR_FILE = Path("calendar_events.json")
-POLLS_FILE = Path("polls.json")
-USER_STATUS_FILE = Path("user_status.json")
-TASK_COMMENTS_FILE = Path("task_comments.json")
-PINNED_MESSAGES_FILE = Path("pinned_messages.json")
-TASK_ATTACHMENTS_FILE = Path("task_attachments.json")
-PROJECTS_FILE = Path("projects.json")
-DEPARTMENTS_FILE = Path("departments.json")
-PERFORMANCE_FILE = Path("performance_reviews.json")
-BUDGET_FILE = Path("budget_tracking.json")
-REPORTS_FILE = Path("reports.json")
-WORKFLOWS_FILE = Path("workflows.json")
-KNOWLEDGE_BASE_FILE = Path("knowledge_base.json")
-INTEGRATIONS_FILE = Path("integrations.json")
+# File paths - Persistent storage for Render
+def get_data_directory():
+    """Get the persistent data directory for Render deployment."""
+    # Use /tmp for Render persistent storage
+    data_dir = Path("/tmp/nafup_data")
+    data_dir.mkdir(exist_ok=True)
+    return data_dir
+
+def backup_data():
+    """Backup all data files to ensure persistence across deployments."""
+    try:
+        data_dir = get_data_directory()
+        backup_dir = Path("/tmp/nafup_backup")
+        backup_dir.mkdir(exist_ok=True)
+        
+        # List of all data files to backup
+        data_files = [
+            "users.json", "auth.json", "companies.json", "notifications.json",
+            "chat_messages.json", "private_chats.json", "shared_files.json",
+            "private_files.json", "calendar_events.json", "polls.json",
+            "user_status.json", "task_comments.json", "pinned_messages.json",
+            "task_attachments.json", "projects.json", "departments.json",
+            "performance_reviews.json", "budget_tracking.json", "reports.json",
+            "workflows.json", "knowledge_base.json", "integrations.json"
+        ]
+        
+        for file_name in data_files:
+            source_file = data_dir / file_name
+            backup_file = backup_dir / file_name
+            
+            if source_file.exists():
+                import shutil
+                shutil.copy2(source_file, backup_file)
+                
+    except Exception as e:
+        pass  # Silently fail if backup fails
+
+def restore_data():
+    """Restore data from backup if main data files don't exist."""
+    try:
+        data_dir = get_data_directory()
+        backup_dir = Path("/tmp/nafup_backup")
+        
+        if not backup_dir.exists():
+            return
+            
+        # List of all data files to restore
+        data_files = [
+            "users.json", "auth.json", "companies.json", "notifications.json",
+            "chat_messages.json", "private_chats.json", "shared_files.json",
+            "private_files.json", "calendar_events.json", "polls.json",
+            "user_status.json", "task_comments.json", "pinned_messages.json",
+            "task_attachments.json", "projects.json", "departments.json",
+            "performance_reviews.json", "budget_tracking.json", "reports.json",
+            "workflows.json", "knowledge_base.json", "integrations.json"
+        ]
+        
+        for file_name in data_files:
+            source_file = data_dir / file_name
+            backup_file = backup_dir / file_name
+            
+            if not source_file.exists() and backup_file.exists():
+                import shutil
+                shutil.copy2(backup_file, source_file)
+                
+    except Exception as e:
+        pass  # Silently fail if restore fails
+
+DATA_FILE = get_data_directory() / "users.json"
+AUTH_FILE = get_data_directory() / "auth.json"
+COMPANIES_FILE = get_data_directory() / "companies.json"
+NOTIFICATIONS_FILE = get_data_directory() / "notifications.json"
+CHAT_FILE = get_data_directory() / "chat_messages.json"
+PRIVATE_CHAT_FILE = get_data_directory() / "private_chats.json"
+FILES_FILE = get_data_directory() / "shared_files.json"
+PRIVATE_FILES_FILE = get_data_directory() / "private_files.json"
+CALENDAR_FILE = get_data_directory() / "calendar_events.json"
+POLLS_FILE = get_data_directory() / "polls.json"
+USER_STATUS_FILE = get_data_directory() / "user_status.json"
+TASK_COMMENTS_FILE = get_data_directory() / "task_comments.json"
+PINNED_MESSAGES_FILE = get_data_directory() / "pinned_messages.json"
+TASK_ATTACHMENTS_FILE = get_data_directory() / "task_attachments.json"
+PROJECTS_FILE = get_data_directory() / "projects.json"
+DEPARTMENTS_FILE = get_data_directory() / "departments.json"
+PERFORMANCE_FILE = get_data_directory() / "performance_reviews.json"
+BUDGET_FILE = get_data_directory() / "budget_tracking.json"
+REPORTS_FILE = get_data_directory() / "reports.json"
+WORKFLOWS_FILE = get_data_directory() / "workflows.json"
+KNOWLEDGE_BASE_FILE = get_data_directory() / "knowledge_base.json"
+INTEGRATIONS_FILE = get_data_directory() / "integrations.json"
 
 # -------------------------------------------------------------
 # Enhanced Authentication Functions
@@ -2849,8 +2916,8 @@ def save_session_to_file():
             "session_id": session_id
         }
         
-        # Save to file
-        session_file = Path(f"temp_session_{session_id}.json")
+        # Save to file in persistent directory
+        session_file = get_data_directory() / f"temp_session_{session_id}.json"
         try:
             with session_file.open("w", encoding="utf-8") as f:
                 json.dump(session_data, f, indent=2, ensure_ascii=False)
@@ -2864,7 +2931,7 @@ def load_session_from_file():
         return None
     
     session_id = st.session_state["persistent_session_id"]
-    session_file = Path(f"temp_session_{session_id}.json")
+    session_file = get_data_directory() / f"temp_session_{session_id}.json"
     
     if session_file.exists():
         try:
@@ -2888,7 +2955,7 @@ def clear_session_file():
     """Clear temporary session file."""
     if "persistent_session_id" in st.session_state:
         session_id = st.session_state["persistent_session_id"]
-        session_file = Path(f"temp_session_{session_id}.json")
+        session_file = get_data_directory() / f"temp_session_{session_id}.json"
         session_file.unlink(missing_ok=True)
 
 def save_current_session():
@@ -2904,6 +2971,9 @@ def navigate_to_page(page_name):
 # Main Application
 # -------------------------------------------------------------
 def main():
+    # Restore data from backup if needed
+    restore_data()
+    
     # Add custom CSS for notifications
     st.markdown("""
     <style>
@@ -3016,6 +3086,13 @@ def main():
             # Session is valid, refresh it to extend the timeout
             st.session_state["session_timestamp"] = get_session_timestamp()
             save_current_session()
+            
+            # Periodic backup (every 10 minutes)
+            current_time = time.time()
+            last_backup = st.session_state.get("last_backup_time", 0)
+            if current_time - last_backup > 600:  # 10 minutes
+                backup_data()
+                st.session_state["last_backup_time"] = current_time
     
     # Authentication check
     if not st.session_state["authenticated"]:
