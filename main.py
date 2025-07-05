@@ -2579,16 +2579,6 @@ def show_login_page():
                         st.session_state["authenticated"] = True
                         st.session_state["username"] = username
                         st.session_state["session_timestamp"] = get_session_timestamp()
-                        
-                        # Save session to file for persistence
-                        session_data = {
-                            "authenticated": True,
-                            "username": username,
-                            "session_timestamp": st.session_state["session_timestamp"],
-                            "current_page": "dashboard"
-                        }
-                        save_session_to_file(session_data)
-                        
                         st.success(message)
                         st.rerun()
                     else:
@@ -2831,103 +2821,12 @@ def calculate_team_stats(company_code: str) -> dict:
         "completion_rate": completion_rate
     }
 
-# Session management functions
-def get_browser_fingerprint():
-    """Generate a unique browser fingerprint for session isolation."""
-    # This creates a unique identifier for each browser session
-    # In a real implementation, you might use more sophisticated fingerprinting
-    import random
-    import string
-    
-    # Generate a random session ID for this browser session
-    if "browser_session_id" not in st.session_state:
-        st.session_state["browser_session_id"] = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
-    
-    return st.session_state["browser_session_id"]
-
-def get_user_session_file(username: str, browser_id: str):
-    """Get the session file path for a specific user and browser."""
-    # Use username + browser ID to create a unique session file
-    session_file = Path(f"user_session_{username}_{browser_id}.json")
-    return session_file
-
-def save_session_to_file(session_data: dict):
-    """Save session data to user-specific file."""
-    username = session_data.get("username", "")
-    if not username:
-        return
-    
-    browser_id = get_browser_fingerprint()
-    session_file = get_user_session_file(username, browser_id)
-    
-    try:
-        with session_file.open("w", encoding="utf-8") as f:
-            json.dump(session_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        st.error(f"Failed to save session: {e}")
-
-def load_session_from_file(username: str, browser_id: str):
-    """Load session data from user-specific file."""
-    session_file = get_user_session_file(username, browser_id)
-    
-    if session_file.exists():
-        try:
-            with session_file.open("r", encoding="utf-8") as f:
-                session_data = json.load(f)
-            
-            # Check if session is still valid
-            session_timestamp = session_data.get("session_timestamp")
-            if session_timestamp and is_session_valid(session_timestamp, timeout_hours=48):
-                return session_data
-            else:
-                # Session expired, remove the file
-                session_file.unlink(missing_ok=True)
-        except Exception as e:
-            # If there's any error reading the file, remove it
-            session_file.unlink(missing_ok=True)
-    
-    return None
-
-def clear_session_file(username: str, browser_id: str):
-    """Clear user-specific session file."""
-    session_file = get_user_session_file(username, browser_id)
-    session_file.unlink(missing_ok=True)
-
-def find_existing_session():
-    """Find if there's an existing valid session for the current browser."""
-    browser_id = get_browser_fingerprint()
-    
-    # Look for session files for this browser
-    session_files = list(Path(".").glob(f"user_session_*_{browser_id}.json"))
-    
-    for session_file in session_files:
-        try:
-            with session_file.open("r", encoding="utf-8") as f:
-                session_data = json.load(f)
-            
-            # Check if session is still valid
-            session_timestamp = session_data.get("session_timestamp")
-            if session_timestamp and is_session_valid(session_timestamp, timeout_hours=48):
-                return session_data
-            else:
-                # Session expired, remove the file
-                session_file.unlink(missing_ok=True)
-        except Exception as e:
-            # If there's any error reading the file, remove it
-            session_file.unlink(missing_ok=True)
-    
-    return None
-
+# Session management functions - Simplified approach
 def save_current_session():
-    """Save current session state to file."""
-    if st.session_state.get("authenticated", False):
-        session_data = {
-            "authenticated": st.session_state.get("authenticated", False),
-            "username": st.session_state.get("username", ""),
-            "session_timestamp": st.session_state.get("session_timestamp"),
-            "current_page": st.session_state.get("current_page", "dashboard")
-        }
-        save_session_to_file(session_data)
+    """Save current session state (no file persistence needed)."""
+    # This function is kept for compatibility but doesn't save to file
+    # Streamlit's session state is already persistent per browser session
+    pass
 
 # -------------------------------------------------------------
 # Main Application
@@ -3018,36 +2917,24 @@ def main():
     if "session_timestamp" not in st.session_state:
         st.session_state["session_timestamp"] = None
     
-    # Try to restore session from file if not authenticated
-    if not st.session_state["authenticated"]:
-        # First, try to find any existing valid session
-        saved_session = find_existing_session()
-        if saved_session:
-            st.session_state["authenticated"] = saved_session.get("authenticated", False)
-            st.session_state["username"] = saved_session.get("username", "")
-            st.session_state["session_timestamp"] = saved_session.get("session_timestamp")
-            st.session_state["current_page"] = saved_session.get("current_page", "dashboard")
+    # No file-based session restoration - rely only on Streamlit's session state
+    # Each browser session is automatically isolated by Streamlit
     
     # Session validation and automatic login
     if st.session_state["authenticated"]:
         session_timestamp = st.session_state.get("session_timestamp")
         if session_timestamp is None or not is_session_valid(session_timestamp, timeout_hours=48):
             # Session expired
-            username = st.session_state.get("username", "")
-            browser_id = get_browser_fingerprint()
             st.session_state["authenticated"] = False
             st.session_state["username"] = ""
             st.session_state["session_timestamp"] = None
             st.session_state["current_page"] = "dashboard"
-            if username:
-                clear_session_file(username, browser_id)  # Clear the session file
             st.warning("⚠️ Your session has expired. Please login again.")
             show_login_page()
             return
         else:
             # Session is valid, refresh it to extend the timeout
             st.session_state["session_timestamp"] = get_session_timestamp()
-            save_current_session()
     
     # Authentication check
     if not st.session_state["authenticated"]:
@@ -3096,23 +2983,18 @@ def main():
         # Personal features
         if st.button("🏠 Dashboard", use_container_width=True):
             st.session_state["current_page"] = "dashboard"
-            save_current_session()
         
         if st.button("📋 My Tasks", use_container_width=True):
             st.session_state["current_page"] = "tasks"
-            save_current_session()
         
         if st.button("📝 Notes", use_container_width=True):
             st.session_state["current_page"] = "notes"
-            save_current_session()
         
         if st.button("👥 Contacts", use_container_width=True):
             st.session_state["current_page"] = "contacts"
-            save_current_session()
         
         if st.button("🎯 Goals", use_container_width=True):
             st.session_state["current_page"] = "goals"
-            save_current_session()
         
         # Company features
         if company_info and company_info.get("name"):
@@ -3120,55 +3002,44 @@ def main():
             
             if st.button("👥 Team Members", use_container_width=True):
                 st.session_state["current_page"] = "team"
-                save_current_session()
             
             if can_assign_tasks(username):
                 if st.button("📋 Assign Tasks", use_container_width=True):
                     st.session_state["current_page"] = "assign_tasks"
-                    save_current_session()
             
             if st.button("📊 Team Analytics", use_container_width=True):
                 st.session_state["current_page"] = "analytics"
-                save_current_session()
             
             # Chat features for company members
             if st.button("💬 Company Chat", use_container_width=True):
                 st.session_state["current_page"] = "company_chat"
-                save_current_session()
             
             if st.button("💬 Private Chat", use_container_width=True):
                 st.session_state["current_page"] = "private_chat"
-                save_current_session()
             
             # File sharing
             if st.button("📁 File Sharing", use_container_width=True):
                 st.session_state["current_page"] = "file_sharing"
-                save_current_session()
             
             # Calendar
             if st.button("📅 Calendar", use_container_width=True):
                 st.session_state["current_page"] = "calendar"
-                save_current_session()
             
             # Polls
             if st.button("📊 Polls", use_container_width=True):
                 st.session_state["current_page"] = "polls"
-                save_current_session()
             
             # Search
             if st.button("🔍 Search", use_container_width=True):
                 st.session_state["current_page"] = "search"
-                save_current_session()
             
             if user_info.get("role") in ["admin", "manager", "ceo", "cfo", "cto", "vp", "director"]:
                 if st.button("👥 Role Management", use_container_width=True):
                     st.session_state["current_page"] = "role_management"
-                    save_current_session()
             
             if user_info.get("role") in ["admin", "manager"]:
                 if st.button("⚙️ Company Settings", use_container_width=True):
                     st.session_state["current_page"] = "company_settings"
-                    save_current_session()
         
         # Advanced Management Features (Upper Level)
         if user_info.get("role") in ["admin", "manager", "ceo", "cfo", "cto", "vp", "director", "senior_manager"]:
@@ -3176,42 +3047,33 @@ def main():
             
             if st.button("📊 Project Management", use_container_width=True):
                 st.session_state["current_page"] = "project_management"
-                save_current_session()
             
             if st.button("🏢 Department Management", use_container_width=True):
                 st.session_state["current_page"] = "department_management"
-                save_current_session()
             
             if st.button("📈 Performance Reviews", use_container_width=True):
                 st.session_state["current_page"] = "performance_reviews"
-                save_current_session()
             
             if st.button("💰 Budget Management", use_container_width=True):
                 st.session_state["current_page"] = "budget_management"
-                save_current_session()
             
             if st.button("📋 Advanced Reports", use_container_width=True):
                 st.session_state["current_page"] = "advanced_reports"
-                save_current_session()
             
             if st.button("🔄 Workflow Management", use_container_width=True):
                 st.session_state["current_page"] = "workflow_management"
-                save_current_session()
             
             if st.button("📚 Knowledge Base", use_container_width=True):
                 st.session_state["current_page"] = "knowledge_base"
-                save_current_session()
             
             if st.button("🔗 Integrations", use_container_width=True):
                 st.session_state["current_page"] = "integrations"
-                save_current_session()
     
         # Company creation for users without a company
         if not company_info:
             st.markdown("### 🏢 Company Management")
             if st.button("🏢 Create Company", use_container_width=True):
                 st.session_state["current_page"] = "create_company"
-                save_current_session()
         
         # Notifications with enhanced counter
         notifications = get_user_notifications(username)
@@ -3227,21 +3089,13 @@ def main():
         
         if st.button(notification_text, use_container_width=True, key="notifications_button"):
             st.session_state["current_page"] = "notifications"
-            save_current_session()
         
         # Settings and logout
         st.markdown("---")
         if st.button("⚙️ Settings", use_container_width=True):
             st.session_state["current_page"] = "settings"
-            save_current_session()
         
         if st.button("🚪 Logout", use_container_width=True):
-            # Clear session file
-            username = st.session_state.get("username", "")
-            browser_id = get_browser_fingerprint()
-            if username:
-                clear_session_file(username, browser_id)
-            
             # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
